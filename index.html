@@ -4,9 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Friends Game Night</title>
+  
   <!-- Firebase Compatibility SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  
+  <!-- Fireworks / Confetti Library -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
 
   <style>
     :root {
@@ -232,19 +236,60 @@
       border: 1px solid #6366f1;
     }
 
-    .question-list-item {
+    /* Winner Popup Modal */
+    .modal {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(11, 15, 25, 0.92);
       display: flex;
-      justify-content: space-between;
+      justify-content: center;
       align-items: center;
-      padding: 0.65rem 0.85rem;
-      background: #0f1526;
-      border-radius: 8px;
-      margin-bottom: 0.5rem;
-      font-size: 0.9rem;
+      z-index: 1000;
+      padding: 1rem;
     }
+    .modal-content {
+      background: var(--card-bg);
+      padding: 3rem 2rem;
+      border-radius: 20px;
+      text-align: center;
+      width: 100%;
+      max-width: 400px;
+      border: 1px solid var(--accent);
+      box-shadow: 0 0 40px var(--accent-glow);
+      animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    @keyframes popIn {
+      0% { transform: scale(0.7); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+    .modal-content h3 {
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .modal-content h1 {
+      font-size: 3.2rem;
+      margin-bottom: 2rem;
+      color: var(--success);
+      text-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+      background: none;
+      -webkit-text-fill-color: var(--success);
+    }
+
   </style>
 </head>
 <body>
+
+<!-- WINNER MODAL OVERLAY -->
+<div id="winner-modal" class="modal hidden">
+  <div class="modal-content">
+    <h3>Round Winner!</h3>
+    <h1 id="winner-name-display">Name</h1>
+    <button class="btn btn-outline" onclick="closeWinnerModal()">Close</button>
+  </div>
+</div>
 
 <div class="container">
 
@@ -342,6 +387,11 @@
         <button class="btn" id="btn-start-game" onclick="adminStartGame()" style="background:#3b82f6;">Start / Resume</button>
         <button class="btn btn-danger" onclick="adminEndGame()">End Game</button>
       </div>
+      
+      <!-- Reset Entire Game -->
+      <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border);">
+        <button class="btn btn-outline" style="color: var(--danger); border-color: var(--danger);" onclick="adminResetGame()">⚠ Reset Entire Game Data</button>
+      </div>
     </div>
 
     <!-- Question Management Section -->
@@ -388,6 +438,9 @@
   let cachedQuestions = [];
   let cachedPlayers = {};
   let cachedAwards = {};
+  
+  // Track this to know exactly when Priyanka clicks "Show Results"
+  let previousShowResultsState = false;
 
   // 2. AUTHENTICATION LOGIC
   document.getElementById('login-btn').addEventListener('click', () => {
@@ -438,7 +491,20 @@
 
   // 3. REALTIME SYNC LISTENERS
   db.ref('gameState').on('value', snapshot => {
-    cachedGameState = snapshot.val() || { status: 'waiting', currentQuestionIndex: 0, showResults: false };
+    const newState = snapshot.val() || { status: 'waiting', currentQuestionIndex: 0, showResults: false, lastAwardWinner: "" };
+    
+    // Check if Priyanka just clicked "Show Result" to trigger Fireworks
+    if (newState.showResults === true && previousShowResultsState === false && newState.lastAwardWinner) {
+      fireWinnerCelebration(newState.lastAwardWinner);
+    }
+    
+    // If we move to next round or reset, hide the modal
+    if (newState.showResults === false) {
+      closeWinnerModal();
+    }
+    
+    previousShowResultsState = newState.showResults;
+    cachedGameState = newState;
     renderApp();
   });
 
@@ -465,6 +531,39 @@
     } else if (currentUser) {
       renderPlayerView();
     }
+  }
+
+  // --- FIREWORKS & CELEBRATION LOGIC ---
+  function fireWinnerCelebration(winnerName) {
+    const modal = document.getElementById('winner-modal');
+    document.getElementById('winner-name-display').innerText = winnerName;
+    modal.classList.remove('hidden');
+    
+    // Launch Canvas Confetti Fireworks
+    var duration = 3.5 * 1000;
+    var animationEnd = Date.now() + duration;
+    var defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 2000 };
+
+    function randomInRange(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    var interval = setInterval(function() {
+      var timeLeft = animationEnd - Date.now();
+
+      if (timeLeft <= 0) {
+        return clearInterval(interval);
+      }
+
+      var particleCount = 50 * (timeLeft / duration);
+      // Fireworks from left and right edges
+      confetti(Object.assign({}, defaults, { particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } }));
+      confetti(Object.assign({}, defaults, { particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } }));
+    }, 250);
+  }
+
+  function closeWinnerModal() {
+    document.getElementById('winner-modal').classList.add('hidden');
   }
 
   // --- PLAYER RENDERING ---
@@ -505,22 +604,19 @@
         statusBadge.style.background = "#312e81";
       }
 
-      // Render Candidate Options
       const container = document.getElementById('player-options-container');
       container.innerHTML = "";
 
-      const options = currentQ.options || ALL_CANDIDATES;
       const tally = getTallyForQuestion();
       const maxVotes = Math.max(...Object.values(tally), 0);
 
-      options.forEach(opt => {
+      ALL_CANDIDATES.forEach(opt => {
         const btn = document.createElement('button');
         btn.className = 'option-btn';
         btn.innerText = opt;
 
         if (myVote === opt) btn.classList.add('selected');
 
-        // If results are revealed
         if (cachedGameState.showResults) {
           btn.disabled = true;
           const votesCount = tally[opt] || 0;
@@ -536,7 +632,6 @@
         } else {
           btn.onclick = () => castVote(opt);
         }
-
         container.appendChild(btn);
       });
     }
@@ -555,7 +650,6 @@
 
     document.getElementById('admin-q-number').innerText = totalQ > 0 ? `${qIndex + 1} / ${totalQ}` : '0 / 0';
     
-    // Calculate total votes
     let votedCount = 0;
     const totalPlayers = Object.keys(cachedPlayers).length;
     Object.values(cachedPlayers).forEach(p => {
@@ -573,11 +667,10 @@
     const container = document.getElementById('admin-live-results');
     container.innerHTML = "";
 
-    const options = currentQ.options || ALL_CANDIDATES;
     const tally = getTallyForQuestion();
     const maxVotes = Math.max(...Object.values(tally), 0);
 
-    options.forEach(opt => {
+    ALL_CANDIDATES.forEach(opt => {
       const box = document.createElement('div');
       box.className = 'option-btn';
       box.innerText = opt;
@@ -602,7 +695,6 @@
   function renderQuestionsManager() {
     const list = document.getElementById('admin-questions-list');
     list.innerHTML = "";
-
     cachedQuestions.forEach((q, idx) => {
       const item = document.createElement('div');
       item.className = 'question-list-item';
@@ -619,7 +711,6 @@
   function renderLeaderboard(containerId) {
     const container = document.getElementById(containerId);
     container.innerHTML = "";
-
     const sorted = Object.entries(cachedAwards).sort((a, b) => b[1] - a[1]);
     const maxAward = sorted.length > 0 ? sorted[0][1] : 0;
 
@@ -646,32 +737,40 @@
 
   // 5. ADMIN CONTROL ACTIONS
   function adminStartGame() {
-    db.ref('gameState').update({
-      status: 'active',
-      showResults: false
-    });
+    db.ref('gameState').update({ status: 'active', showResults: false });
   }
 
   function adminShowResult() {
     const tally = getTallyForQuestion();
     let max = 0;
-    let winner = "";
+    let winners = [];
 
+    // Find the max votes and grab all candidates who got that many (in case of tie)
     for (const [candidate, count] of Object.entries(tally)) {
       if (count > max) {
         max = count;
-        winner = candidate;
+        winners = [candidate];
+      } else if (count === max && count > 0) {
+        winners.push(candidate);
       }
     }
 
-    // Award point if there's a winner
-    if (winner && max > 0) {
-      db.ref(`awards/${winner}`).transaction(current => (current || 0) + 1);
+    let finalWinnerText = "";
+
+    if (winners.length === 1) {
+      finalWinnerText = winners[0];
+      // Give them a point in the database
+      db.ref(`awards/${winners[0]}`).transaction(current => (current || 0) + 1);
+    } else if (winners.length > 1) {
+      // It's a tie
+      finalWinnerText = "It's a Tie! \n(" + winners.join(" & ") + ")";
+    } else {
+      finalWinnerText = "Nobody Voted!";
     }
 
     db.ref('gameState').update({
       showResults: true,
-      lastAwardWinner: winner || "Tie"
+      lastAwardWinner: finalWinnerText
     });
   }
 
@@ -681,8 +780,6 @@
       alert("No more questions. Click 'End Game' to see final awards.");
       return;
     }
-
-    // Reset all player votes
     const voteClears = {};
     Object.keys(cachedPlayers).forEach(player => {
       voteClears[`players/${player}/currentVote`] = "";
@@ -700,17 +797,39 @@
     db.ref('gameState/status').set('ended');
   }
 
+  // --- NEW RESET GAME FUNCTION ---
+  function adminResetGame() {
+    if (confirm("🚨 Are you sure you want to completely restart the game? This will erase all current votes and reset everyone's awards back to ZERO.")) {
+      const dbUpdates = {};
+      
+      // Clear votes
+      Object.keys(cachedPlayers).forEach(p => {
+        dbUpdates[`players/${p}/currentVote`] = "";
+      });
+      // Zero out awards
+      Object.keys(cachedAwards).forEach(p => {
+        dbUpdates[`awards/${p}`] = 0;
+      });
+      
+      // Reset game state back to Lobby / Question 1
+      dbUpdates['gameState/status'] = 'waiting';
+      dbUpdates['gameState/currentQuestionIndex'] = 0;
+      dbUpdates['gameState/showResults'] = false;
+      dbUpdates['gameState/lastAwardWinner'] = "";
+
+      db.ref().update(dbUpdates);
+      
+      // Close modal forcefully if open
+      closeWinnerModal();
+      alert("Game has been reset successfully. All players are back in the lobby.");
+    }
+  }
+
   function adminAddQuestion() {
     const input = document.getElementById('new-question-text');
     const text = input.value.trim();
     if (!text) return;
-
-    // No options array passed! It uses ALL_CANDIDATES naturally.
-    const newQ = {
-      id: cachedQuestions.length,
-      text: text
-    };
-
+    const newQ = { id: cachedQuestions.length, text: text };
     const updatedList = [...cachedQuestions, newQ];
     db.ref('questions').set(updatedList, () => {
       input.value = "";
